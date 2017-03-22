@@ -1,13 +1,11 @@
 var Regl = require('regl')
 var load = require('resl')
 var Camera = require('regl-camera')
+var Mat4 = require('gl-mat4')
+var Vec3 = require('gl-vec3')
 var FullScreenQuad = require('full-screen-quad')
 
 var regl = Regl()
-var camera = Camera(regl, {
-  up: [ 0, 1, 0 ],
-  center: [ 0, 0, 4 ]
-})
 
 load({
   manifest: {
@@ -57,10 +55,13 @@ function launch ({ normal, diffuse }) {
         gl_FragColor = diff;
       }
     `,
+    cull: {
+      enable: true 
+    },
     count: regl.prop('geometry.count'),
     uniforms: {
       u_diffuse: regl.prop('geometry.diffuse'),
-      // u_normal: regl.prop('geometry.normal')
+      u_normal: regl.prop('geometry.normal')
     },
     attributes: {
       a_position: regl.prop('geometry.vertices'),
@@ -94,8 +95,13 @@ function launch ({ normal, diffuse }) {
     normal: regl.texture(normal),
     count: 6
   }
+  var camera = Camera(regl, {
+    theta: Math.PI / 2 // TODO: regl-camera default is ZY plane
+  })
 
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
+    var theta = Math.sin(time) * 2 * Math.PI
     camera(_ => render({ geometry: wall }))
+    console.log(theta)
   })
 }

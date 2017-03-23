@@ -53,6 +53,8 @@ function launch ({ normal, diffuse }) {
       } 
     `,
     frag: glslify`
+      #extension GL_OES_standard_derivatives : enable
+
       precision highp float; 
 
       #pragma glslify: to_linear = require(glsl-gamma/in)
@@ -132,15 +134,17 @@ function launch ({ normal, diffuse }) {
   }
   var camera = Camera(regl, {
     distance: 4,
-    theta: Math.PI / 2 // TODO: regl-camera default is ZY plane
+    theta: Math.PI / 2 // regl-camera default is ZY plane
   })
   var light = [ 0, 0, 10 ]
-  var clearProps = { color: [ 0, 0, 0, 1 ] }
+  var clearProps = { 
+    color: [ 0, 0, 0, 1 ],
+    depth: 1
+  }    
 
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
     regl.clear(clearProps)
     light[0] = Math.sin(time) * 10
-    // light[2] = Math.cos(time) * 10
     camera(_ => render({ geometry: wall, light: light }))
   })
 }

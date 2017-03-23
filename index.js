@@ -34,6 +34,7 @@ function launch ({ normal, diffuse }) {
       attribute vec3 a_normal;
       attribute vec2 a_tx_coord;
 
+      uniform float u_time;
       uniform mat4 projection;
       uniform mat4 view;
 
@@ -59,34 +60,47 @@ function launch ({ normal, diffuse }) {
 
       #pragma glslify: to_linear = require(glsl-gamma/in)
       #pragma glslify: to_gamma = require(glsl-gamma/out)
+      #pragma glslify: perturb_normal = require(glsl-perturb-normal)
+      #pragma glslify: attenuation = require(./attenuation)
 
+      uniform mat4 view;
       uniform vec3 u_light;
+      uniform vec3 eye;
       uniform sampler2D u_diffuse;
       uniform sampler2D u_normal;
       uniform float u_shininess;
-      uniform vec3 eye;
+      uniform float u_tiling_factor;
 
       varying vec3 v_position;
       varying vec3 v_normal;
       varying vec2 v_tx_coord;
 
-      const vec3 ambient_color = vec3(0.2, 0.0, 0.0);
+      const float light_radius = .1;
+      const float light_falloff = 3.;
+      const float ambient_factor = .01;
+      const vec3 ambient_color = vec3(.95);
       const vec3 specular_color = vec3(1.0, 1.0, 1.0);
 
       void main() {
-        vec3 eye_dir = normalize(eye - v_position);
-        vec3 light_dir = normalize(u_light - v_position);
-        vec3 color = to_linear(texture2D(u_diffuse, v_tx_coord)).rgb;
-        vec3 normal = to_linear(texture2D(u_normal, v_tx_coord)).rgb; // TODO: not used yet.  this is for normal-mapping
+        vec3 v_light = (view * vec4(u_light, 1)).xyz;
+        vec2 tile_tx = v_tx_coord * u_tiling_factor;
+        vec3 eye_dir = normalize(v_position);
+        vec3 light_vector = v_light - v_position;
+        vec3 light_dir = normalize(light_vector);
+        vec3 diffuse_color = to_linear(texture2D(u_diffuse, tile_tx)).rgb;
+        vec3 normal = to_linear(texture2D(u_normal, tile_tx)).rgb * 2. - 1.;
+        vec3 adjusted_normal = perturb_normal(normal, v_normal, eye_dir, tile_tx);
         vec3 half_dir = normalize(light_dir + eye_dir);
-        float diffuse = max(dot(v_normal, light_dir), 0.0);
-        float specular = pow(max(dot(half_dir, v_normal), 0.0), u_shininess);
+        float light_dist = length(light_vector);
+        float diffuse = max(dot(adjusted_normal, light_dir), 0.0);
+        float specular = pow(max(dot(half_dir, adjusted_normal), 0.0), u_shininess);
+        float falloff = attenuation(light_radius, light_falloff, light_dist);
 
-        gl_FragColor.rgb = (.05 + diffuse) * color;
-        gl_FragColor.rgb += specular * specular_color;
-        gl_FragColor.a = 1.;
+        gl_FragColor.rgb = ambient_color * ambient_factor;
+        gl_FragColor.rgb += diffuse * diffuse_color * falloff;
+        gl_FragColor.rgb += specular * specular_color * falloff;
         gl_FragColor = to_gamma(gl_FragColor);
-        gl_FragColor = clamp(gl_FragColor, 0., 1.);
+        gl_FragColor.a = 1.;
       }
     `,
     cull: {
@@ -94,10 +108,12 @@ function launch ({ normal, diffuse }) {
     },
     count: regl.prop('geometry.count'),
     uniforms: {
+      u_time: regl.prop('time'),
       u_diffuse: regl.prop('geometry.diffuse'),
       u_normal: regl.prop('geometry.normal'),
       u_shininess: regl.prop('geometry.shininess'),
-      u_light: regl.prop('light')
+      u_tiling_factor: regl.prop('geometry.tiling_factor'),
+      u_light: regl.prop('light'),
     },
     attributes: {
       a_position: regl.prop('geometry.vertices'),
@@ -127,24 +143,41 @@ function launch ({ normal, diffuse }) {
     vertices: regl.buffer(vertices),
     normals: regl.buffer(normals),
     texCoords: regl.buffer(texCoords),
-    diffuse: regl.texture(diffuse),
-    normal: regl.texture(normal),
-    shininess: 200,
+    diffuse: regl.texture({
+      data: diffuse,
+      wrapS: 'repeat',
+      wrapT: 'repeat'
+    }),
+    normal: regl.texture({
+      data: normal,
+      wrapS: 'repeat',
+      wrapT: 'repeat'
+    }),
+    shininess: 800,
+    tiling_factor: 4,
     count: 6
   }
   var camera = Camera(regl, {
     distance: 4,
     theta: Math.PI / 2 // regl-camera default is ZY plane
   })
-  var light = [ 0, 0, 10 ]
+  var light = [ 0, 1, 10 ]
   var clearProps = { 
     color: [ 0, 0, 0, 1 ],
     depth: 1
   }    
+  var renderProps = {
+    geometry: wall,
+    light: light,
+    time: 0
+  }
 
+  window.wall = wall
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
     regl.clear(clearProps)
-    light[0] = Math.sin(time) * 10
-    camera(_ => render({ geometry: wall, light: light }))
+    Vec3.copy(light, camera.eye)
+    console.log(light)
+    renderProps.time = time
+    camera(_ => render(renderProps))
   })
 }

@@ -28,7 +28,7 @@ load({
     },
     normal: {
       type: 'image',
-      src: 'textures/stone_NRM.png'
+      src: 'textures/stone_NRM.jpg'
     },
     specular: {
       type: 'image',
@@ -115,7 +115,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
         float light_dist = length(light_vector);
 
         vec3 diffuse_color = to_linear(texture2D(u_diffuse, tile_tx)).rgb;
-        vec3 normal_map = to_linear(texture2D(u_normal, tile_tx)).rgb;
+        vec3 normal_map = 2. * to_linear(texture2D(u_normal, tile_tx)).rgb - 1.;
         vec3 adjusted_normal = perturb_normal(normal_map, v_normal, eye_dir, v_tx_coord);
         float specular_map = to_linear(texture2D(u_specular, tile_tx)).r;
 
@@ -180,7 +180,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
     shininess: 60,
     albedo: .95,
     roughess: 1, 
-    tiling_factor: 2,
+    tiling_factor: 1,
     count: 6
   }
   var camera = Camera(regl, {

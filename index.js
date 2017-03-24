@@ -10,6 +10,16 @@ var regl = Regl({
   extensions: [ 'OES_standard_derivatives' ]
 })
 
+function texture (regl, img) {
+  return regl.texture({
+    data: img,
+    wrapS: 'repeat',
+    wrapT: 'repeat',
+    mag: 'linear',
+    min: 'linear mipmap linear'
+  })
+}
+
 load({
   manifest: {
     diffuse: {
@@ -22,13 +32,17 @@ load({
     },
     specular: {
       type: 'image',
-     src: 'textures/stone_SPEC.png' 
+      src: 'textures/stone_SPEC.png' 
+    },
+    displacement: {
+      type: 'image',
+      src: 'textures/stone_DISP.png' 
     }
   },
   onDone: launch
 })
 
-function launch ({ normal, diffuse, specular }) {
+function launch ({ normal, diffuse, specular, displacement }) {
   var render = regl({
     vert: glslify`
       #pragma glslify: transpose = require(glsl-transpose)
@@ -75,6 +89,7 @@ function launch ({ normal, diffuse, specular }) {
       uniform sampler2D u_diffuse;
       uniform sampler2D u_normal;
       uniform sampler2D u_specular;
+      uniform sampler2D u_displacement;
       uniform float u_shininess;
       uniform float u_roughness;
       uniform float u_albedo;
@@ -123,6 +138,7 @@ function launch ({ normal, diffuse, specular }) {
       u_diffuse: regl.prop('geometry.diffuse'),
       u_normal: regl.prop('geometry.normal'),
       u_specular: regl.prop('geometry.specular'),
+      u_displacement: regl.prop('geometry.displacement'),
       u_shininess: regl.prop('geometry.shininess'),
       u_roughness: regl.prop('geometry.roughess'),
       u_albedo: regl.prop('geometry.albedo'),
@@ -157,27 +173,10 @@ function launch ({ normal, diffuse, specular }) {
     vertices: regl.buffer(vertices),
     normals: regl.buffer(normals),
     texCoords: regl.buffer(texCoords),
-    diffuse: regl.texture({
-      data: diffuse,
-      wrapS: 'repeat',
-      wrapT: 'repeat',
-      mag: 'linear',
-      min: 'linear mipmap linear'
-    }),
-    normal: regl.texture({
-      data: normal,
-      wrapS: 'repeat',
-      wrapT: 'repeat',
-      mag: 'linear',
-      min: 'linear mipmap linear'
-    }),
-    specular: regl.texture({
-      data: specular,
-      wrapS: 'repeat',
-      wrapT: 'repeat',
-      mag: 'linear',
-      min: 'linear mipmap linear'
-    }),
+    diffuse: texture(regl, diffuse),
+    normal: texture(regl, normal),
+    specular: texture(regl, specular),
+    displacement: texture(regl, displacement),
     shininess: 60,
     albedo: .95,
     roughess: 1, 

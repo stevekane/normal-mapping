@@ -14,17 +14,21 @@ load({
   manifest: {
     diffuse: {
       type: 'image',
-      src: 'textures/stone_COLOR.png'
+      src: 'textures/stone.jpg'
     },
     normal: {
       type: 'image',
       src: 'textures/stone_NRM.png'
-    } 
+    },
+    specular: {
+      type: 'image',
+     src: 'textures/stone_SPEC.png' 
+    }
   },
   onDone: launch
 })
 
-function launch ({ normal, diffuse }) {
+function launch ({ normal, diffuse, specular }) {
   var render = regl({
     vert: glslify`
       #pragma glslify: transpose = require(glsl-transpose)
@@ -61,7 +65,7 @@ function launch ({ normal, diffuse }) {
       #pragma glslify: to_linear = require(glsl-gamma/in)
       #pragma glslify: to_gamma = require(glsl-gamma/out)
       #pragma glslify: perturb_normal = require(glsl-perturb-normal)
-      #pragma glslify: blinn_phong_specular = require(glsl-specular-blinn-phong)
+      #pragma glslify: phong_specular = require(glsl-specular-phong)
       #pragma glslify: oren_nayar_diffuse = require(glsl-diffuse-oren-nayar)
       #pragma glslify: attenuation = require(./attenuation)
 
@@ -70,6 +74,7 @@ function launch ({ normal, diffuse }) {
       uniform vec3 eye;
       uniform sampler2D u_diffuse;
       uniform sampler2D u_normal;
+      uniform sampler2D u_specular;
       uniform float u_shininess;
       uniform float u_roughness;
       uniform float u_albedo;
@@ -82,6 +87,7 @@ function launch ({ normal, diffuse }) {
       const float light_radius = 10.;
       const float light_falloff = .1;
       const vec3 specular_color = vec3(1.0, 1.0, 1.0);
+      const vec3 black = vec3(0);
 
       void main() {
         vec2 tile_tx = v_tx_coord * u_tiling_factor;
@@ -96,9 +102,10 @@ function launch ({ normal, diffuse }) {
         vec3 diffuse_color = to_linear(texture2D(u_diffuse, tile_tx)).rgb;
         vec3 normal_map = to_linear(texture2D(u_normal, tile_tx)).rgb;
         vec3 adjusted_normal = perturb_normal(normal_map, v_normal, eye_dir, v_tx_coord);
+        float specular_map = to_linear(texture2D(u_specular, tile_tx)).r;
 
         float diffuse_factor = oren_nayar_diffuse(light_dir, v_position, adjusted_normal, u_roughness, u_albedo);
-        float specular_factor = .2 * blinn_phong_specular(light_dir, eye_dir, adjusted_normal, u_shininess);
+        float specular_factor = specular_map * phong_specular(light_dir, eye_dir, adjusted_normal, u_shininess);
         float falloff = attenuation(light_radius, light_falloff, light_dist);
 
         gl_FragColor.rgb = diffuse_color * diffuse_factor * falloff;
@@ -115,6 +122,7 @@ function launch ({ normal, diffuse }) {
       u_time: regl.prop('time'),
       u_diffuse: regl.prop('geometry.diffuse'),
       u_normal: regl.prop('geometry.normal'),
+      u_specular: regl.prop('geometry.specular'),
       u_shininess: regl.prop('geometry.shininess'),
       u_roughness: regl.prop('geometry.roughess'),
       u_albedo: regl.prop('geometry.albedo'),
@@ -163,8 +171,15 @@ function launch ({ normal, diffuse }) {
       mag: 'linear',
       min: 'linear mipmap linear'
     }),
-    shininess: 200,
-    albedo: .9,
+    specular: regl.texture({
+      data: specular,
+      wrapS: 'repeat',
+      wrapT: 'repeat',
+      mag: 'linear',
+      min: 'linear mipmap linear'
+    }),
+    shininess: 60,
+    albedo: .95,
     roughess: 1, 
     tiling_factor: 2,
     count: 6
@@ -173,7 +188,7 @@ function launch ({ normal, diffuse }) {
     distance: 3,
     theta: Math.PI / 2 // regl-camera default is ZY plane
   })
-  var light = [ 0, 0, 1 ]
+  var light = [ 0, 0, 2 ]
   var clearProps = { 
     color: [ 0, 0, 0, 1 ],
     depth: 1
@@ -186,8 +201,8 @@ function launch ({ normal, diffuse }) {
 
   window.wall = wall
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
-    renderProps.light[0] = Math.sin(time)
-    renderProps.light[2] = Math.abs(Math.cos(time)) + 1
+    renderProps.light[0] = Math.sin(time) * 2
+    renderProps.light[1] = Math.cos(time) * 2
     renderProps.time = time
     regl.clear(clearProps)
     camera(_ => render(renderProps))

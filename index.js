@@ -24,11 +24,11 @@ load({
   manifest: {
     diffuse: {
       type: 'image',
-      src: 'textures/stone.jpg'
+      src: 'textures/stone_COLOR.png'
     },
     normal: {
       type: 'image',
-      src: 'textures/stone_NRM.jpg'
+      src: 'textures/stone_NRM.png'
     },
     specular: {
       type: 'image',
@@ -50,25 +50,40 @@ function launch ({ normal, diffuse, specular, displacement }) {
 
       attribute vec4 a_position;
       attribute vec3 a_normal;
+      attribute vec3 a_tangent;
+      attribute vec3 a_bitangent;
       attribute vec2 a_tx_coord;
 
       uniform float u_time;
       uniform mat4 projection;
       uniform mat4 view;
+      uniform vec3 u_light;
+      uniform vec3 eye;
 
-      varying vec3 v_position;
-      varying vec3 v_normal;
+      varying vec3 v_world_frag_pos;
+      varying vec3 v_view_position;
+      varying vec3 v_tangent_eye_position;
+      varying vec3 v_tangent_light_position;
+      varying vec3 v_tangent_frag_position;
       varying vec2 v_tx_coord;
 
-      void main () {
-        mat4 mv_matrix = view;
-        mat3 normal_matrix = transpose(inverse(mat3(mv_matrix)));
-        vec4 mv_pos = mv_matrix * a_position;
+      // TODO: this would normally change per renderable
+      const mat4 model = mat4(1);
 
-        v_position = mv_pos.xyz;
-        v_normal = normal_matrix * a_normal;
+      void main () {
+        mat3 normal_matrix = transpose(inverse(mat3(model)));
+        vec3 T = normalize(normal_matrix * a_tangent);
+        vec3 B = normalize(normal_matrix * a_bitangent);
+        vec3 N = normalize(normal_matrix * a_normal);
+        mat3 TBN = transpose(mat3(T, B, N));
+
+        v_world_frag_pos = vec3(model * a_position);
+        v_tangent_eye_position = TBN * eye;
+        v_tangent_light_position = TBN * u_light;
+        v_tangent_frag_position = TBN * v_world_frag_pos;
         v_tx_coord = a_tx_coord;
-        gl_Position = projection * mv_pos;
+
+        gl_Position = projection * view * model * a_position;
       } 
     `,
     frag: glslify`
@@ -78,7 +93,6 @@ function launch ({ normal, diffuse, specular, displacement }) {
 
       #pragma glslify: to_linear = require(glsl-gamma/in)
       #pragma glslify: to_gamma = require(glsl-gamma/out)
-      #pragma glslify: perturb_normal = require(glsl-perturb-normal)
       #pragma glslify: phong_specular = require(glsl-specular-phong)
       #pragma glslify: oren_nayar_diffuse = require(glsl-diffuse-oren-nayar)
       #pragma glslify: attenuation = require(./attenuation)
@@ -94,39 +108,70 @@ function launch ({ normal, diffuse, specular, displacement }) {
       uniform float u_roughness;
       uniform float u_albedo;
       uniform float u_tiling_factor;
+      uniform bool u_normal_mapping;
+      uniform bool u_parallax_mapping;
+      uniform bool u_debug_height;
 
-      varying vec3 v_position;
-      varying vec3 v_normal;
+      varying vec3 v_world_frag_pos;
+      varying vec3 v_view_position;
+      varying vec3 v_tangent_eye_position;
+      varying vec3 v_tangent_light_position;
+      varying vec3 v_tangent_frag_position;
       varying vec2 v_tx_coord;
 
-      const float light_radius = 10.;
+      const float height_scale = .1;
+      const float light_radius = 2.;
       const float light_falloff = .1;
-      const vec3 specular_color = vec3(1.0, 1.0, 1.0);
-      const vec3 black = vec3(0);
+      const float ambient_factor = 0.02;
+      const vec3 specular_color = vec3(1.);
 
-      void main() {
-        vec2 tile_tx = v_tx_coord * u_tiling_factor;
+      vec2 parallax_mapping ( float scale, float height, vec3 view_dir, vec2 tx ) {
+        vec2 p = ( view_dir.xy / view_dir.z ) * ( height * scale );
+              
+        return tx - p; 
+      }
 
-        vec3 eye_dir = normalize(-v_position);
-
-        vec3 v_light = (view * vec4(u_light, 1)).xyz;
-        vec3 light_vector = v_light - v_position;
-        vec3 light_dir = normalize(light_vector);
+      void main () {
+        vec3 view_dir = normalize(v_tangent_eye_position - v_tangent_frag_position);
+        vec3 light_dir = normalize(v_tangent_light_position - v_tangent_frag_position);
+        vec3 light_vector = u_light - v_world_frag_pos;
+        vec2 tx = v_tx_coord * u_tiling_factor;
         float light_dist = length(light_vector);
+        float height = texture2D(u_displacement, tx).r;
 
-        vec3 diffuse_color = to_linear(texture2D(u_diffuse, tile_tx)).rgb;
-        vec3 normal_map = 2. * to_linear(texture2D(u_normal, tile_tx)).rgb - 1.;
-        vec3 adjusted_normal = perturb_normal(normal_map, v_normal, eye_dir, v_tx_coord);
-        float specular_map = to_linear(texture2D(u_specular, tile_tx)).r;
+        // parallax-mapping
+        if ( u_parallax_mapping ) {
+          tx = parallax_mapping(height_scale, height, view_dir, tx);
+        }
+        
+        // normal-mapping. normal in tangent-space
+        vec3 normal;
+        if ( u_normal_mapping ) {
+          normal = normalize(texture2D(u_normal, tx).xyz * 2. - 1.); 
+        }
+        else {
+          normal = vec3(0, 0, 1);
+        }
 
-        float diffuse_factor = oren_nayar_diffuse(light_dir, v_position, adjusted_normal, u_roughness, u_albedo);
-        float specular_factor = specular_map * phong_specular(light_dir, eye_dir, adjusted_normal, u_shininess);
+        // diffuse and specular map
+        vec3 diffuse_color = to_linear(texture2D(u_diffuse, tx)).rgb;
+        float specular_map = to_linear(texture2D(u_specular, tx)).r;
+
+        float diffuse_factor = max(dot(light_dir, normal), 0.);
+        float specular_factor = specular_map * phong_specular(light_dir, view_dir, normal, u_shininess);
         float falloff = attenuation(light_radius, light_falloff, light_dist);
-
-        gl_FragColor.rgb = diffuse_color * diffuse_factor * falloff;
-        gl_FragColor.rgb += specular_color * specular_factor * falloff;
-        gl_FragColor = to_gamma(gl_FragColor);
-        gl_FragColor.a = 1.;
+        vec3 color = ambient_factor * diffuse_color;
+        
+        color += diffuse_color * diffuse_factor * falloff;
+        color += specular_color * specular_factor * falloff;
+        color = to_gamma(color);
+        
+        if ( u_debug_height ) {
+          gl_FragColor = to_gamma(vec4(height, height, height, 1.));
+        }
+        else {
+          gl_FragColor = vec4(color, 1.);
+        }
       }
     `,
     cull: {
@@ -144,23 +189,20 @@ function launch ({ normal, diffuse, specular, displacement }) {
       u_albedo: regl.prop('geometry.albedo'),
       u_tiling_factor: regl.prop('geometry.tiling_factor'),
       u_light: regl.prop('light'),
+      u_normal_mapping: regl.prop('normalMapping'),
+      u_parallax_mapping: regl.prop('parallaxMapping'),
+      u_debug_height: regl.prop('debugHeight')
     },
     attributes: {
       a_position: regl.prop('geometry.vertices'),
       a_normal: regl.prop('geometry.normals'),
+      a_tangent: regl.prop('geometry.tangents'),
+      a_bitangent: regl.prop('geometry.bitangents'),
       a_tx_coord: regl.prop('geometry.texCoords')
     }
   })
 
   var vertices = new FullScreenQuad(4)
-  var normals = [
-    0, 0, 1,  
-    0, 0, 1,  
-    0, 0, 1,  
-    0, 0, 1,  
-    0, 0, 1,  
-    0, 0, 1,  
-  ]
   var texCoords = [ 
     1, 1, 
     0, 1, 
@@ -169,25 +211,37 @@ function launch ({ normal, diffuse, specular, displacement }) {
     0, 0,
     1, 0
   ]
+  var normals = []
+  var tangents = []
+  var bitangents = []
+  
+  for ( var i = 0; i < 6; i++ ) {
+    normals.push(0, 0, 1) 
+    tangents.push(1, 0, 0)
+    bitangents.push(0, 1, 0)
+  }
+
   var wall = {
     vertices: regl.buffer(vertices),
     normals: regl.buffer(normals),
+    tangents: regl.buffer(tangents),
+    bitangents: regl.buffer(bitangents),
     texCoords: regl.buffer(texCoords),
     diffuse: texture(regl, diffuse),
     normal: texture(regl, normal),
     specular: texture(regl, specular),
     displacement: texture(regl, displacement),
-    shininess: 60,
+    shininess: 50,
     albedo: .95,
     roughess: 1, 
     tiling_factor: 1,
     count: 6
   }
   var camera = Camera(regl, {
-    distance: 3,
-    theta: Math.PI / 2 // regl-camera default is ZY plane
+    distance: 2.5,
+    theta: Math.PI / 2, // regl-camera default is ZY plane
   })
-  var light = [ 0, 0, 2 ]
+  var light = [ 0, 0, 1 ]
   var clearProps = { 
     color: [ 0, 0, 0, 1 ],
     depth: 1
@@ -195,13 +249,17 @@ function launch ({ normal, diffuse, specular, displacement }) {
   var renderProps = {
     geometry: wall,
     light: light,
-    time: 0
+    time: 0,
+    parallaxMapping: true,
+    normalMapping: true,
+    debugHeight: false,
   }
 
-  window.wall = wall
+  window.r = renderProps
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
-    renderProps.light[0] = Math.sin(time) * 2
-    renderProps.light[1] = Math.cos(time) * 2
+    renderProps.light[0] = Math.sin(time)
+    renderProps.light[1] = Math.sin(time)
+    // renderProps.light[2] = Math.abs(Math.sin(time / 4)) * 10
     renderProps.time = time
     regl.clear(clearProps)
     camera(_ => render(renderProps))

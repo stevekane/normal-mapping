@@ -71,7 +71,8 @@ function launch ({ normal, diffuse, specular, displacement }) {
       const mat4 model = mat4(1);
 
       void main () {
-        mat3 normal_matrix = transpose(inverse(mat3(model)));
+        // TODO: is this nonsense needed or is this just the mat3(model)?
+        mat3 normal_matrix = mat3(model);
         vec3 T = normalize(normal_matrix * a_tangent);
         vec3 B = normalize(normal_matrix * a_bitangent);
         vec3 N = normalize(normal_matrix * a_normal);
@@ -108,6 +109,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
       uniform float u_roughness;
       uniform float u_albedo;
       uniform float u_tiling_factor;
+      uniform float u_height_scale;
       uniform bool u_normal_mapping;
       uniform bool u_parallax_mapping;
       uniform bool u_debug_height;
@@ -119,7 +121,6 @@ function launch ({ normal, diffuse, specular, displacement }) {
       varying vec3 v_tangent_frag_position;
       varying vec2 v_tx_coord;
 
-      const float height_scale = .1;
       const float light_radius = 2.;
       const float light_falloff = .1;
       const float ambient_factor = 0.02;
@@ -137,11 +138,11 @@ function launch ({ normal, diffuse, specular, displacement }) {
         vec3 light_vector = u_light - v_world_frag_pos;
         vec2 tx = v_tx_coord * u_tiling_factor;
         float light_dist = length(light_vector);
-        float height = texture2D(u_displacement, tx).r;
+        float height = 1. - texture2D(u_displacement, tx).r;
 
         // parallax-mapping
         if ( u_parallax_mapping ) {
-          tx = parallax_mapping(height_scale, height, view_dir, tx);
+          tx = parallax_mapping(u_height_scale, height, view_dir, tx);
         }
         
         // normal-mapping. normal in tangent-space
@@ -165,13 +166,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
         color += diffuse_color * diffuse_factor * falloff;
         color += specular_color * specular_factor * falloff;
         color = to_gamma(color);
-        
-        if ( u_debug_height ) {
-          gl_FragColor = to_gamma(vec4(height, height, height, 1.));
-        }
-        else {
-          gl_FragColor = vec4(color, 1.);
-        }
+        gl_FragColor = vec4(color, 1.);
       }
     `,
     cull: {
@@ -191,7 +186,8 @@ function launch ({ normal, diffuse, specular, displacement }) {
       u_light: regl.prop('light'),
       u_normal_mapping: regl.prop('normalMapping'),
       u_parallax_mapping: regl.prop('parallaxMapping'),
-      u_debug_height: regl.prop('debugHeight')
+      u_debug_height: regl.prop('debugHeight'),
+      u_height_scale: regl.prop('heightScale')
     },
     attributes: {
       a_position: regl.prop('geometry.vertices'),
@@ -241,7 +237,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
     distance: 2.5,
     theta: Math.PI / 2, // regl-camera default is ZY plane
   })
-  var light = [ 0, 0, 1 ]
+  var light = [ 0, 0, .4 ]
   var clearProps = { 
     color: [ 0, 0, 0, 1 ],
     depth: 1
@@ -253,13 +249,13 @@ function launch ({ normal, diffuse, specular, displacement }) {
     parallaxMapping: true,
     normalMapping: true,
     debugHeight: false,
+    heightScale: 0.006
   }
 
   window.r = renderProps
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
     renderProps.light[0] = Math.sin(time)
     renderProps.light[1] = Math.sin(time)
-    // renderProps.light[2] = Math.abs(Math.sin(time / 4)) * 10
     renderProps.time = time
     regl.clear(clearProps)
     camera(_ => render(renderProps))

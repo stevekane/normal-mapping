@@ -4,6 +4,7 @@ var load = require('resl')
 var Camera = require('regl-camera')
 var Mat4 = require('gl-mat4')
 var Vec3 = require('gl-vec3')
+var Quat = require('gl-quat')
 var FullScreenQuad = require('full-screen-quad')
 
 var regl = Regl({
@@ -57,6 +58,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
       uniform float u_time;
       uniform mat4 projection;
       uniform mat4 view;
+      uniform mat4 u_model;
       uniform vec3 u_light;
       uniform vec3 eye;
 
@@ -67,24 +69,20 @@ function launch ({ normal, diffuse, specular, displacement }) {
       varying vec3 v_tangent_frag_position;
       varying vec2 v_tx_coord;
 
-      // TODO: this would normally change per renderable
-      const mat4 model = mat4(1);
-
       void main () {
-        // TODO: is this nonsense needed or is this just the mat3(model)?
-        mat3 normal_matrix = mat3(model);
+        mat3 normal_matrix = mat3(u_model);
         vec3 T = normalize(normal_matrix * a_tangent);
         vec3 B = normalize(normal_matrix * a_bitangent);
         vec3 N = normalize(normal_matrix * a_normal);
         mat3 TBN = transpose(mat3(T, B, N));
 
-        v_world_frag_pos = vec3(model * a_position);
+        v_world_frag_pos = vec3(u_model * a_position);
         v_tangent_eye_position = TBN * eye;
         v_tangent_light_position = TBN * u_light;
         v_tangent_frag_position = TBN * v_world_frag_pos;
         v_tx_coord = a_tx_coord;
 
-        gl_Position = projection * view * model * a_position;
+        gl_Position = projection * view * u_model * a_position;
       } 
     `,
     frag: glslify`
@@ -175,6 +173,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
     count: regl.prop('geometry.count'),
     uniforms: {
       u_time: regl.prop('time'),
+      u_model: regl.prop('geometry.modelMatrix'),
       u_diffuse: regl.prop('geometry.diffuse'),
       u_normal: regl.prop('geometry.normal'),
       u_specular: regl.prop('geometry.specular'),
@@ -182,7 +181,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
       u_shininess: regl.prop('geometry.shininess'),
       u_roughness: regl.prop('geometry.roughess'),
       u_albedo: regl.prop('geometry.albedo'),
-      u_tiling_factor: regl.prop('geometry.tiling_factor'),
+      u_tiling_factor: regl.prop('geometry.tilingFactor'),
       u_light: regl.prop('light'),
       u_normal_mapping: regl.prop('normalMapping'),
       u_parallax_mapping: regl.prop('parallaxMapping'),
@@ -218,6 +217,9 @@ function launch ({ normal, diffuse, specular, displacement }) {
   }
 
   var wall = {
+    position: Vec3.create(),
+    rotation: Quat.create(),
+    modelMatrix: Mat4.create(),
     vertices: regl.buffer(vertices),
     normals: regl.buffer(normals),
     tangents: regl.buffer(tangents),
@@ -230,7 +232,7 @@ function launch ({ normal, diffuse, specular, displacement }) {
     shininess: 50,
     albedo: .95,
     roughess: 1, 
-    tiling_factor: 1,
+    tilingFactor: 2,
     count: 6
   }
   var camera = Camera(regl, {
@@ -255,8 +257,12 @@ function launch ({ normal, diffuse, specular, displacement }) {
   window.r = renderProps
   regl.frame(function ({ tick, time, viewportWidth, viewportHeight }) {
     renderProps.light[0] = Math.sin(time)
-    renderProps.light[1] = Math.sin(time)
+    renderProps.light[1] = Math.cos(time)
     renderProps.time = time
+    // wall.position[0] = Math.cos(time)
+    // wall.position[2] = Math.sin(time)
+    // Quat.rotateZ(wall.rotation, wall.rotation, Math.PI / 128)
+    Mat4.fromRotationTranslation(wall.modelMatrix, wall.rotation, wall.position)
     regl.clear(clearProps)
     camera(_ => render(renderProps))
   })
